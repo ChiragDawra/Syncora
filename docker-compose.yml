@@ -1,0 +1,46 @@
+# ETE (unit 8): api + client + mongo + redis.
+#   docker compose up --build        -> http://localhost:8080
+#   docker compose exec -e NODE_ENV=development api node scripts/seed.js   (demo data)
+services:
+  mongo:
+    image: mongo:7
+    # single-node replica set, so cascade deletes can use transactions like on Atlas
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    volumes: [mongo-data:/data/db]
+    ports: ["27017:27017"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }).ok }"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  api:
+    build: ./server
+    env_file:
+      - path: ./server/.env
+        required: false
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/syncora?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      CLIENT_URL: http://localhost:8080
+      # override in a .env file next to this compose file for anything beyond local use
+      JWT_SECRET: ${JWT_SECRET:-compose-local-only-secret-change-me-0123456789}
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_started }
+    volumes:
+      - uploads:/app/uploads
+    ports: ["5000:5000"]
+
+  client:
+    build: ./client
+    depends_on: [api]
+    ports: ["8080:80"]
+
+volumes:
+  mongo-data:
+  uploads:
